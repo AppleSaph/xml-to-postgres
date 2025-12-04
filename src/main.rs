@@ -459,14 +459,16 @@ fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
       write!(table.buf.borrow_mut(), "CREATE TABLE IF NOT EXISTS {}_{} ({}, {} {});\n", fkey.split_once(' ').unwrap().0, table.name, fkey, table.name, if table.columns.is_empty() { "integer" } else { &table.columns[0].datatype }).unwrap();
     }
     else {
+      let mut explicit_fkey = false;
       let mut cols = table.columns.iter().filter_map(|c| {
         if c.hide || (c.subtable.is_some() && c.subtable.as_ref().unwrap().cardinality != Cardinality::ManyToOne) { return None; }
+        if c.fkey.is_some() { explicit_fkey = true; }
         let mut spec = String::from(&c.name);
         spec.push(' ');
         spec.push_str(&c.datatype);
         Some(spec)
       }).collect::<Vec<String>>().join(", ");
-      if fkey.is_some() { cols.insert_str(0, &format!("{}, ", fkey.as_ref().unwrap())); }
+      if fkey.is_some() && !explicit_fkey { cols.insert_str(0, &format!("{}, ", fkey.as_ref().unwrap())); }
       write!(table.buf.borrow_mut(), "CREATE TABLE IF NOT EXISTS {} ({});\n", table.name, cols).unwrap();
     }
   }
@@ -479,11 +481,13 @@ fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
       write!(table.buf.borrow_mut(), "COPY {}_{} ({}, {}) FROM stdin;\n", parent, table.name, parent, table.name).unwrap();
     }
     else {
+      let mut explicit_fkey = false;
       let cols = table.columns.iter().filter_map(|c| {
         if c.hide || (c.subtable.is_some() && c.subtable.as_ref().unwrap().cardinality != Cardinality::ManyToOne) { return None; }
+        if c.fkey.is_some() { explicit_fkey = true; }
         Some(String::from(&c.name))
       }).collect::<Vec<String>>().join(", ");
-      if fkey.is_some() {
+      if fkey.is_some() && !explicit_fkey {
         write!(table.buf.borrow_mut(), "COPY {} ({}, {}) FROM stdin;\n", table.name, fkey.unwrap().split(' ').next().unwrap(), cols).unwrap();
       }
       else { write!(table.buf.borrow_mut(), "COPY {} ({}) FROM stdin;\n", table.name, cols).unwrap(); }
@@ -948,7 +952,9 @@ fn process_event(event: &Event, state: &mut State) -> Step {
         }
         else {
           if !state.tables.is_empty() { // This is a subtable
-            if table.cardinality != Cardinality::ManyToOne { // Write the first column value of the parent table as the first column of the subtable (for use as a foreign key)
+            if table.cardinality != Cardinality::ManyToOne && table.columns.iter().find(|c| c.fkey.is_some()).is_none() {
+              // Write the first column value of the parent table as the first column of the subtable (for use as a foreign key)
+              // but only if there is no explicit fkey column defined
               let key = state.tables.last().unwrap().lastid.borrow();
               if key.is_empty() && !state.settings.hush_warning { println!("Warning: subtable {} has no foreign key for parent (you may need to add a 'seri' column)", table.name); }
               write!(table.buf.borrow_mut(), "{}\t", key).unwrap();
