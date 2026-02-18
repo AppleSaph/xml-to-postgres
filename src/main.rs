@@ -185,7 +185,7 @@ impl BBox {
       static ref RE: Regex = Regex::new(r"^([0-9.]+),([0-9.]+) ([0-9.]+),([0-9.]+)$").unwrap();
     }
     RE.captures(str).map(|caps|
-      BBox { minx: caps[1].parse().unwrap(), miny: caps[2].parse().unwrap(), maxx: caps[3].parse().unwrap(), maxy: caps[4].parse().unwrap() }
+        BBox { minx: caps[1].parse().unwrap(), miny: caps[2].parse().unwrap(), maxx: caps[3].parse().unwrap(), maxy: caps[4].parse().unwrap() }
     )
   }
 }
@@ -216,6 +216,7 @@ struct State<'a, 'b> {
   xmltotext: bool,
   text: String,
   gmltoewkb: bool,
+  gmltocoord: bool,
   gmlpos: bool,
   gmlcoll: Vec<Geometry>,
   trimre: Regex,
@@ -290,6 +291,83 @@ fn gml_to_ewkb(cell: &RefCell<String>, coll: &[Geometry], bbox: Option<&BBox>, m
   true
 }
 
+fn rd_to_wgs84(x: f64, y: f64) -> (f64, f64) {
+  // Polynomial approximation for RD New (EPSG:28992) -> WGS84 (EPSG:4326).
+  let dx = (x - 155000.0) / 100000.0;
+  let dy = (y - 463000.0) / 100000.0;
+
+  let lat = 52.15517440
+      + (3235.65389 * dy
+      + -32.58297 * dx * dx
+      + -0.2475 * dy * dy
+      + -0.84978 * dx * dx * dy
+      + -0.0655 * dy * dy * dy
+      + -0.01709 * dx * dx * dx
+      + -0.00738 * dx * dy * dy
+      + 0.0053 * dx * dx * dx * dy
+      + -0.00039 * dx * dx * dx * dx
+      + 0.00033 * dx * dy * dy * dy
+      + -0.00012 * dx * dx * dy * dy) / 3600.0;
+
+  let lon = 5.38720621
+      + (5260.52916 * dx
+      + 105.94684 * dx * dy
+      + 2.45656 * dx * dy * dy
+      + -0.81885 * dx * dx * dx
+      + 0.05594 * dx * dy * dy * dy
+      + -0.05607 * dx * dx * dx * dy
+      + 0.01199 * dy
+      + -0.00256 * dx * dx * dx * dx
+      + 0.00128 * dx * dy * dy * dy * dy
+      + 0.00022 * dy * dy
+      + -0.00022 * dx * dx
+      + 0.00026 * dx * dx * dx * dx * dx) / 3600.0;
+
+  (lat, lon)
+}
+
+fn gml_to_coord(cell: &RefCell<String>, coll: &[Geometry], settings: &Settings) -> bool {
+  let mut sumx = 0.0;
+  let mut sumy = 0.0;
+  let mut count: u64 = 0;
+
+  for geom in coll {
+    let step = match geom.dims {
+      2 => 2,
+      3 => 3,
+      _ => {
+        if !settings.hush_warning {
+          eprintln!("Warning: GML number of dimensions {} not supported", geom.dims);
+        }
+        continue;
+      }
+    };
+
+    for ring in geom.rings.iter() {
+      let mut i = 0usize;
+      while i + 1 < ring.len() {
+        sumx += ring[i];
+        sumy += ring[i + 1];
+        count += 1;
+        i += step;
+      }
+    }
+  }
+
+  if count == 0 {
+    if !settings.hush_warning {
+      eprintln!("Warning: no valid GML coordinates found for gml-to-coord conversion");
+    }
+    return false;
+  }
+
+  let (lat, lon) = rd_to_wgs84(sumx / count as f64, sumy / count as f64);
+  let mut value = cell.borrow_mut();
+  value.clear();
+  write!(value, "{:.8},{:.8}", lon, lat).unwrap();
+  true
+}
+
 fn add_table<'a>(name: &str, rowpath: &str, outfile: Option<&str>, settings: &Settings, colspec: &'a [Yaml], cardinality: Cardinality) -> Table<'a> {
   let mut table = Table::new(name, rowpath, outfile, settings, cardinality);
   for col in colspec {
@@ -299,9 +377,9 @@ fn add_table<'a>(name: &str, rowpath: &str, outfile: Option<&str>, settings: &Se
       None => fatalerr!("Error: column {} option 'fkey' is invalid", colname)
     }});
     let colpath =
-      if let Some(true) = col["seri"].as_bool() { "/" }
-      else if fkey.is_some() { "/" }
-      else { col["path"].as_str().unwrap_or_else(|| fatalerr!("Error: table '{}' column '{}' has no 'path' entry in configuration file", name, colname)) };
+        if let Some(true) = col["seri"].as_bool() { "/" }
+        else if fkey.is_some() { "/" }
+        else { col["path"].as_str().unwrap_or_else(|| fatalerr!("Error: table '{}' column '{}' has no 'path' entry in configuration file", name, colname)) };
     let mut path = String::from(&table.path);
     if !colpath.is_empty() && !colpath.starts_with('/') { path.push('/'); }
     path.push_str(colpath);
@@ -338,7 +416,7 @@ fn add_table<'a>(name: &str, rowpath: &str, outfile: Option<&str>, settings: &Se
           let filename = col["file"].as_str().unwrap();
           if table.columns.is_empty() { fatalerr!("Error: table '{}' cannot have a subtable as first column", name); }
           let mut subtable = add_table(colname, &path, Some(filename), settings, &[], cardinality);
-//          subtable.columns.push(Column { name: String::from("id"), path: String::new(), datatype: String::from("integer"), ..Default::default() });
+          //          subtable.columns.push(Column { name: String::from("id"), path: String::new(), datatype: String::from("integer"), ..Default::default() });
           subtable.columns.push(Column { name: colname.to_string(), path: path.clone(), datatype: "integer".to_string(), include: mem::take(&mut include), exclude: mem::take(&mut exclude), ..Default::default() });
           emit_preamble(&subtable, settings, Some(format!("{} {}", name, table.columns[0].datatype)));
           Some(subtable)
@@ -410,7 +488,7 @@ fn add_table<'a>(name: &str, rowpath: &str, outfile: Option<&str>, settings: &Se
     let multitype = col["mult"].as_bool().unwrap_or(false);
 
     if let Some(val) = convert {
-      if !vec!("xml-to-text", "gml-to-ewkb", "concat-text").contains(&val) {
+      if !vec!("xml-to-text", "gml-to-ewkb", "gml-to-coord", "concat-text").contains(&val) {
         fatalerr!("Error: table '{}' option 'conv' contains invalid value: {}", name, val);
       }
       if val == "gml-to-ewkb" && !settings.hush_notice {
@@ -563,6 +641,7 @@ fn main() {
     xmltotext: false,
     text: String::new(),
     gmltoewkb: false,
+    gmltocoord: false,
     gmlpos: false,
     gmlcoll: vec![],
     step: Step::Next,
@@ -581,10 +660,10 @@ fn main() {
       if events%10000 == 0 && start.elapsed().as_secs() > report {
         report += 2;
         eprint!("\rInfo: [{}] {} rows processed{}{}",
-          state.tables.first().unwrap_or(&state.table).name,
-          state.fullcount-state.filtercount-state.skipcount,
-          match state.filtercount { 0 => "".to_owned(), n => format!(" ({} excluded)", n) },
-          match state.skipcount { 0 => "".to_owned(), n => format!(" ({} skipped)", n) }
+                state.tables.first().unwrap_or(&state.table).name,
+                state.fullcount-state.filtercount-state.skipcount,
+                match state.filtercount { 0 => "".to_owned(), n => format!(" ({} excluded)", n) },
+                match state.skipcount { 0 => "".to_owned(), n => format!(" ({} skipped)", n) }
         );
       }
     }
@@ -593,8 +672,8 @@ fn main() {
       match state.step {
         Step::Next => break,
         Step::Repeat => {
-            // if !deferred.is_empty() { deferred.clear(); }
-            continue
+          // if !deferred.is_empty() { deferred.clear(); }
+          continue
         },
         Step::Defer => {
           // println!("Defer {:?}", event);
@@ -638,13 +717,13 @@ fn main() {
   if !state.settings.hush_info {
     let elapsed = start.elapsed().as_secs_f32();
     eprintln!("{}Info: [{}] {} rows processed in {:.*} seconds{}{}",
-      match state.settings.show_progress { true => "\r", false => "" },
-      maintable.name,
-      state.fullcount-state.filtercount-state.skipcount,
-      if elapsed > 9.9 { 0 } else if elapsed > 0.99 { 1 } else if elapsed > 0.099 { 2 } else { 3 },
-      elapsed,
-      match state.filtercount { 0 => "".to_owned(), n => format!(" ({} excluded)", n) },
-      match state.skipcount { 0 => "".to_owned(), n => format!(" ({} skipped)", n) }
+              match state.settings.show_progress { true => "\r", false => "" },
+              maintable.name,
+              state.fullcount-state.filtercount-state.skipcount,
+              if elapsed > 9.9 { 0 } else if elapsed > 0.99 { 1 } else if elapsed > 0.099 { 2 } else { 3 },
+              elapsed,
+              match state.filtercount { 0 => "".to_owned(), n => format!(" ({} excluded)", n) },
+              match state.skipcount { 0 => "".to_owned(), n => format!(" ({} skipped)", n) }
     );
   }
 }
@@ -667,11 +746,11 @@ fn process_event(event: &Event, state: &mut State) -> Step {
     Event::Decl(ref e) => {
       if !state.settings.hush_version && !state.settings.hush_info {
         eprintln!("Info: reading XML version {} with encoding {}",
-          str::from_utf8(&e.version().unwrap_or_else(|_| fatalerr!("Error: missing or invalid XML version attribute: {:#?}", e.as_ref()))).unwrap(),
-          str::from_utf8(match e.encoding() {
-            Some(Ok(Cow::Borrowed(encoding))) => encoding,
-            _ => b"unknown"
-          }).unwrap()
+                  str::from_utf8(&e.version().unwrap_or_else(|_| fatalerr!("Error: missing or invalid XML version attribute: {:#?}", e.as_ref()))).unwrap(),
+                  str::from_utf8(match e.encoding() {
+                    Some(Ok(Cow::Borrowed(encoding))) => encoding,
+                    _ => b"unknown"
+                  }).unwrap()
         );
       }
     },
@@ -705,7 +784,7 @@ fn process_event(event: &Event, state: &mut State) -> Step {
         state.text.push_str(&format!("<{}>", state.reader.decoder().decode(e.name().as_ref()).unwrap_or_else(|err| fatalerr!("Error: failed to decode XML tag '{}': {}", String::from_utf8_lossy(e.name().as_ref()), err))));
         return Step::Next;
       }
-      else if state.gmltoewkb {
+      else if state.gmltoewkb || state.gmltocoord {
         match state.reader.decoder().decode(e.name().as_ref()) {
           Err(_) => (),
           Ok(tag) => match tag.as_ref() {
@@ -800,8 +879,8 @@ fn process_event(event: &Event, state: &mut State) -> Step {
           }
           // Handle 'subtable' case (the 'cols' entry has 'cols' of its own)
           if table.columns[i].subtable.is_some() {
-              if subtable.is_some() { fatalerr!("Error: multiple subtables starting from the same element is not supported"); }
-              subtable = Some(i);
+            if subtable.is_some() { fatalerr!("Error: multiple subtables starting from the same element is not supported"); }
+            subtable = Some(i);
           }
           // Handle the 'attr' case where the content is read from an attribute of this tag
           if let Some(request) = table.columns[i].attr {
@@ -837,16 +916,17 @@ fn process_event(event: &Event, state: &mut State) -> Step {
             None => (),
             Some("xml-to-text") => state.xmltotext = true,
             Some("gml-to-ewkb") => state.gmltoewkb = true,
+            Some("gml-to-coord") => state.gmltocoord = true,
             Some("concat-text") => state.concattext = true,
             Some(_) => (),
           }
         }
       }
       if let Some(i) = subtable {
-          state.tables.push(table);
-          state.parentcol = Some(&table.columns[i]);
-          state.table = table.columns[i].subtable.as_ref().unwrap();
-          return Step::Repeat; // Continue the repeat loop because a subtable column may also match the current path
+        state.tables.push(table);
+        state.parentcol = Some(&table.columns[i]);
+        state.table = table.columns[i].subtable.as_ref().unwrap();
+        return Step::Repeat; // Continue the repeat loop because a subtable column may also match the current path
       }
     },
     Event::Text(ref e) => {
@@ -863,7 +943,7 @@ fn process_event(event: &Event, state: &mut State) -> Step {
         state.text.push_str(&e.unescape().unwrap_or_else(|err| fatalerr!("Error: failed to decode XML text node '{}': {}", String::from_utf8_lossy(e), err)));
         return Step::Next;
       }
-      else if state.gmltoewkb {
+      else if state.gmltoewkb || state.gmltocoord {
         if state.gmlpos {
           let value = String::from(e.unescape().unwrap_or_else(|err| fatalerr!("Error: failed to decode XML gmlpos '{}': {}", String::from_utf8_lossy(e), err)));
           for pos in value.split(' ') {
@@ -893,7 +973,7 @@ fn process_event(event: &Event, state: &mut State) -> Step {
           }
           // println!("Table {} column {} value {}", table.name, table.columns[i].name, &table.columns[i].value.borrow());
           if i == 0 {
-              table.lastid.borrow_mut().push_str(&table.columns[0].value.borrow());
+            table.lastid.borrow_mut().push_str(&table.columns[0].value.borrow());
           }
           return Step::Next;
         }
@@ -924,7 +1004,7 @@ fn process_event(event: &Event, state: &mut State) -> Step {
       if path_match(&state.path, &table.path) { // This is an end tag of the row path
         for i in 0..table.columns.len() {
           if !*table.columns[i].used.borrow() && !table.columns[i].value.borrow().is_empty() {
-              *state.table.columns[i].used.borrow_mut() = true;
+            *state.table.columns[i].used.borrow_mut() = true;
           }
           if let Some(re) = &table.columns[i].include {
             if !re.is_match(&table.columns[i].value.borrow()) {
@@ -956,8 +1036,8 @@ fn process_event(event: &Event, state: &mut State) -> Step {
               if let Some(domain) = table.domain.as_ref() {
                 let mut domain = domain.borrow_mut();
                 let key = match table.columns[0].serial {
-                    Some(_) => table.columns[1..].iter().map(|c| c.value.borrow().to_string()).collect::<String>(),
-                    None => table.lastid.borrow().to_string()
+                  Some(_) => table.columns[1..].iter().map(|c| c.value.borrow().to_string()).collect::<String>(),
+                  None => table.lastid.borrow().to_string()
                 };
                 if !domain.map.contains_key(&key) {
                   domain.lastid += 1;
@@ -1012,8 +1092,8 @@ fn process_event(event: &Event, state: &mut State) -> Step {
               if let Some(domain) = table.domain.as_ref() {
                 let mut domain = domain.borrow_mut();
                 let key = match table.columns[0].serial {
-                    Some(_) => table.columns[1..].iter().map(|c| c.value.borrow().to_string()).collect::<String>(),
-                    None => table.lastid.borrow().to_string()
+                  Some(_) => table.columns[1..].iter().map(|c| c.value.borrow().to_string()).collect::<String>(),
+                  None => table.lastid.borrow().to_string()
                 };
                 if domain.map.contains_key(&key) {
                   if table.columns[0].serial.is_some() {
@@ -1071,8 +1151,8 @@ fn process_event(event: &Event, state: &mut State) -> Step {
           table.flush();
         }
         if !state.tables.is_empty() {
-            state.table = state.tables.pop().unwrap();
-            return Step::Repeat;
+          state.table = state.tables.pop().unwrap();
+          return Step::Repeat;
         }
       }
       else if state.skipped && path_match(&state.path, &state.settings.skip) {
@@ -1109,6 +1189,19 @@ fn process_event(event: &Event, state: &mut State) -> Step {
           if path_match(&state.path, &table.columns[i].path) {
             state.gmltoewkb = false;
             if !gml_to_ewkb(&table.columns[i].value, &state.gmlcoll, table.columns[i].bbox.as_ref(), table.columns[i].multitype, &state.settings) {
+              state.filtered = true;
+            }
+            state.gmlcoll.clear();
+            return Step::Next;
+          }
+        }
+      }
+      else if state.gmltocoord {
+        if state.gmlpos && ((tag == "/gml:pos") || (tag == "/gml:posList")) { state.gmlpos = false; }
+        for i in 0..table.columns.len() {
+          if path_match(&state.path, &table.columns[i].path) {
+            state.gmltocoord = false;
+            if !gml_to_coord(&table.columns[i].value, &state.gmlcoll, &state.settings) {
               state.filtered = true;
             }
             state.gmlcoll.clear();
