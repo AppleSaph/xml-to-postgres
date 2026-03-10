@@ -517,7 +517,7 @@ fn validate_column_options(
         && (convert.is_none() || convert.unwrap() != "gml-to-ewkb")
         && !settings.hush_warning
     {
-        eprintln!("Warning: the bbox option has no function without conversion type 'gml-to-ekwb'");
+        eprintln!("Warning: the bbox option has no function without conversion type 'gml-to-ewkb'");
     }
 }
 
