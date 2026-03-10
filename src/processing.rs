@@ -493,7 +493,7 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                             // Write the first column value of the parent table as the first column of the subtable (for use as a foreign key)
                             let key = state.tables.last().unwrap().lastid.borrow();
                             if key.is_empty() && !state.settings.hush_warning {
-                                println!("Warning: subtable {} has no foreign key for parent (you may need to add a 'seri' column)", table.name);
+                                eprintln!("Warning: subtable {} has no foreign key for parent (you may need to add a 'seri' column)", table.name);
                             }
                             write!(table.buf.borrow_mut(), "{}\t", key).unwrap();
                             let rowid;
@@ -548,7 +548,7 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                                     if table.lastid.borrow().is_empty()
                                         && !state.settings.hush_warning
                                     {
-                                        println!("Warning: subtable {} has no primary key to normalize on", table.name);
+                                        eprintln!("Warning: subtable {} has no primary key to normalize on", table.name);
                                     }
                                     write!(table.buf.borrow_mut(), "{}", table.lastid.borrow())
                                         .unwrap(); // This is a many-to-many relation; write the two keys into the link table
