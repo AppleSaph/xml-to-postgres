@@ -3,8 +3,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
-#[allow(unused_imports)]
-use std::fmt::Write as _;
 use regex::Regex;
 use quick_xml::Reader;
 use std::io::BufRead;

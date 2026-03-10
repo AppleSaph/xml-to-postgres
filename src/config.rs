@@ -1,3 +1,7 @@
+use crate::fatalerr;
+use crate::models::{BBox, Cardinality, Column, Domain, Settings, Table};
+use crate::output::write_output;
+use regex::Regex;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -7,22 +11,7 @@ use std::mem;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
-use regex::Regex;
 use yaml_rust2::yaml::Yaml;
-
-use crate::models::{BBox, Cardinality, Column, Domain, Settings, Table};
-use crate::output::write_output;
-
-macro_rules! fatalerr {
-    () => ({
-        eprintln!();
-        std::process::exit(1);
-    });
-    ($($arg:tt)*) => ({
-        eprintln!($($arg)*);
-        std::process::exit(1);
-    });
-}
 
 pub fn add_table<'a>(
     name: &str,
@@ -62,7 +51,10 @@ fn create_table<'a>(
                 .unwrap_or_else(|err| {
                     fatalerr!("Error: failed to open output file '{}': {}", file, err)
                 }),
-            mode => fatalerr!("Error: invalid 'mode' setting in configuration file: {}", mode),
+            mode => fatalerr!(
+                "Error: invalid 'mode' setting in configuration file: {}",
+                mode
+            ),
         })),
     };
 
@@ -109,16 +101,17 @@ fn parse_column_config<'a>(
     table_name: &str,
     settings: &Settings,
 ) -> Column<'a> {
-    let colname = col["name"].as_str().unwrap_or_else(|| {
-        fatalerr!("Error: column has no 'name' entry in configuration file")
-    });
+    let colname = col["name"]
+        .as_str()
+        .unwrap_or_else(|| fatalerr!("Error: column has no 'name' entry in configuration file"));
 
-    let fkey = col["fkey"].as_str().map(String::from).map(|v| {
-        match v.split_once('.') {
+    let fkey = col["fkey"]
+        .as_str()
+        .map(String::from)
+        .map(|v| match v.split_once('.') {
             Some((left, right)) => (left.to_string(), right.to_string()),
             None => fatalerr!("Error: column {} option 'fkey' is invalid", colname),
-        }
-    });
+        });
 
     let colpath = if let Some(true) = col["seri"].as_bool() {
         "/"
@@ -159,12 +152,18 @@ fn parse_column_config<'a>(
     let mut datatype = col["type"].as_str().unwrap_or("text").to_string();
     let mut include: Option<Regex> = col["incl"].as_str().map(|str| {
         Regex::new(str).unwrap_or_else(|err| {
-            fatalerr!("Error: invalid regex in 'incl' entry in configuration file: {}", err)
+            fatalerr!(
+                "Error: invalid regex in 'incl' entry in configuration file: {}",
+                err
+            )
         })
     });
     let mut exclude: Option<Regex> = col["excl"].as_str().map(|str| {
         Regex::new(str).unwrap_or_else(|err| {
-            fatalerr!("Error: invalid regex in 'excl' entry in configuration file: {}", err)
+            fatalerr!(
+                "Error: invalid regex in 'excl' entry in configuration file: {}",
+                err
+            )
         })
     });
 
@@ -205,19 +204,15 @@ fn parse_column_config<'a>(
     let replace = col["repl"].as_str();
     let aggr = col["aggr"].as_str();
 
-    let domain = create_domain_if_needed(
-        norm,
-        col,
-        colname,
-        &mut subtable,
-        &mut datatype,
-        settings,
-    );
+    let domain =
+        create_domain_if_needed(norm, col, colname, &mut subtable, &mut datatype, settings);
 
     let bbox = col["bbox"].as_str().and_then(BBox::from);
     let multitype = col["mult"].as_bool().unwrap_or(false);
 
-    validate_column_options(col, convert, aggr, table_name, colname, &bbox, &include, &exclude, &find, settings);
+    validate_column_options(
+        col, convert, aggr, table_name, colname, &bbox, &include, &exclude, &find, settings,
+    );
 
     Column {
         name: colname.to_string(),
@@ -264,7 +259,8 @@ fn create_subtable_if_needed<'a>(
                         table_name
                     );
                 }
-                let mut subtable = add_table(colname, path, Some(filename), settings, &[], cardinality);
+                let mut subtable =
+                    add_table(colname, path, Some(filename), settings, &[], cardinality);
                 subtable.columns.push(Column {
                     name: colname.to_string(),
                     path: path.to_string(),
@@ -288,7 +284,8 @@ fn create_subtable_if_needed<'a>(
                         table_name
                     );
                 }
-                let mut subtable = add_table(colname, path, Some(filename), settings, &[], cardinality);
+                let mut subtable =
+                    add_table(colname, path, Some(filename), settings, &[], cardinality);
                 subtable.columns.push(Column {
                     name: colname.to_string(),
                     path: path.to_string(),
@@ -414,11 +411,7 @@ fn create_domain_if_needed<'a>(
     }
 }
 
-fn create_domain<'a>(
-    tabname: &str,
-    filename: Option<&str>,
-    settings: &Settings,
-) -> Domain<'a> {
+fn create_domain<'a>(tabname: &str, filename: Option<&str>, settings: &Settings) -> Domain<'a> {
     Domain {
         lastid: 0,
         map: HashMap::new(),
@@ -443,9 +436,9 @@ fn populate_domain_columns<'a>(
 ) {
     if !col["cols"].is_badvalue() {
         for col in col["cols"].as_vec().unwrap() {
-            let colname = col["name"]
-                .as_str()
-                .unwrap_or_else(|| fatalerr!("Error: column has no 'name' entry in configuration file"));
+            let colname = col["name"].as_str().unwrap_or_else(|| {
+                fatalerr!("Error: column has no 'name' entry in configuration file")
+            });
             let datatype = col["type"].as_str().unwrap_or("text");
             domain.table.columns.push(Column {
                 name: colname.to_string(),
@@ -493,6 +486,9 @@ fn validate_column_options(
         if val == "gml-to-ewkb" && !settings.hush_notice {
             eprintln!("Notice: gml-to-ewkb conversion is experimental and in no way complete or standards compliant; use at your own risk");
         }
+        if val == "gml-to-coord" && !settings.hush_notice {
+            eprintln!("Notice: gml-to-coord conversion is experimental and in no way complete or standards compliant; use at your own risk");
+        }
         if col["type"].is_badvalue() && val == "gml-to-ewkb" {
             // Note: datatype was already set in parse_column_config
         }
@@ -517,7 +513,10 @@ fn validate_column_options(
             eprintln!("Notice: when using filtering (incl/excl) and aggregation on a single column, the filter is checked after aggregation");
         }
     }
-    if bbox.is_some() && (convert.is_none() || convert.unwrap() != "gml-to-ewkb") && !settings.hush_warning {
+    if bbox.is_some()
+        && (convert.is_none() || convert.unwrap() != "gml-to-ewkb")
+        && !settings.hush_warning
+    {
         eprintln!("Warning: the bbox option has no function without conversion type 'gml-to-ekwb'");
     }
 }
@@ -527,7 +526,12 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
         write!(table.buf.borrow_mut(), "START TRANSACTION;\n").unwrap();
     }
     if settings.emit_droptable {
-        write!(table.buf.borrow_mut(), "DROP TABLE IF EXISTS {};\n", table.name).unwrap();
+        write!(
+            table.buf.borrow_mut(),
+            "DROP TABLE IF EXISTS {};\n",
+            table.name
+        )
+        .unwrap();
     }
     if settings.emit_createtable {
         if table.cardinality == Cardinality::ManyToMany {
@@ -570,7 +574,8 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
             write!(
                 table.buf.borrow_mut(),
                 "CREATE TABLE IF NOT EXISTS {} ({});\n",
-                table.name, cols
+                table.name,
+                cols
             )
             .unwrap();
         }
@@ -584,7 +589,10 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
             write!(
                 table.buf.borrow_mut(),
                 "COPY {}_{} ({}, {}) FROM stdin;\n",
-                parent, table.name, parent, table.name
+                parent,
+                table.name,
+                parent,
+                table.name
             )
             .unwrap();
         } else {
@@ -615,7 +623,8 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
                 write!(
                     table.buf.borrow_mut(),
                     "COPY {} ({}) FROM stdin;\n",
-                    table.name, cols
+                    table.name,
+                    cols
                 )
                 .unwrap();
             }
@@ -623,4 +632,3 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
     }
     table.flush();
 }
-

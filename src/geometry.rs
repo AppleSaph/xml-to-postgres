@@ -1,6 +1,6 @@
+use crate::models::{BBox, Geometry, Settings};
 use std::cell::RefCell;
 use std::fmt::Write as _;
-use crate::models::{Geometry, BBox, Settings};
 
 pub fn gml_to_ewkb(
     cell: &RefCell<String>,
@@ -20,7 +20,7 @@ pub fn gml_to_ewkb(
     for geom in coll {
         // println!("{:?}", geom);
         let code = match geom.dims {
-            2 => 32, // Indicate EWKB where the srid follows this byte
+            2 => 32,       // Indicate EWKB where the srid follows this byte
             3 => 32 | 128, // Add bit to indicate the presence of Z values
             _ => {
                 if !settings.hush_warning {
@@ -42,9 +42,7 @@ pub fn gml_to_ewkb(
             let mut overlapx = false;
             for ring in geom.rings.iter() {
                 if geom.gtype != 1 {
-                    ewkb.extend_from_slice(
-                        &((ring.len() as u32) / geom.dims as u32).to_le_bytes(),
-                    );
+                    ewkb.extend_from_slice(&((ring.len() as u32) / geom.dims as u32).to_le_bytes());
                 } // Points don't have multiple vertices
                 for (i, pos) in ring.iter().enumerate() {
                     if overlap {
@@ -78,9 +76,7 @@ pub fn gml_to_ewkb(
         } else {
             for ring in geom.rings.iter() {
                 if geom.gtype != 1 {
-                    ewkb.extend_from_slice(
-                        &((ring.len() as u32) / geom.dims as u32).to_le_bytes(),
-                    );
+                    ewkb.extend_from_slice(&((ring.len() as u32) / geom.dims as u32).to_le_bytes());
                 } // Points don't have multiple vertices
                 for pos in ring.iter() {
                     ewkb.extend_from_slice(&pos.to_le_bytes());
@@ -180,4 +176,3 @@ pub fn gml_to_coord(cell: &RefCell<String>, coll: &[Geometry], settings: &Settin
     write!(value, "{:.8},{:.8}", lon, lat).unwrap();
     true
 }
-
