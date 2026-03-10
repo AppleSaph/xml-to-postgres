@@ -52,7 +52,7 @@ pub fn gml_to_ewkb(
                             if *pos >= bbox.minx && *pos <= bbox.maxx {
                                 overlapx = true;
                             }
-                        } else if overlapx && *pos < bbox.miny && *pos > bbox.maxy {
+                        } else if overlapx && (*pos >= bbox.miny && *pos <= bbox.maxy) {
                             overlap = true;
                         }
                     } else {
