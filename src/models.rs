@@ -20,6 +20,7 @@ pub struct Settings {
     pub hush_notice: bool,
     pub hush_warning: bool,
     pub show_progress: bool,
+    pub binary_format: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

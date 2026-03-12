@@ -3,6 +3,7 @@ mod geometry;
 mod models;
 mod output;
 mod processing;
+mod binary;
 
 use crate::config::{add_table, emit_preamble};
 use crate::models::{Cardinality, Settings, State, Step};
@@ -77,18 +78,20 @@ fn main() {
     let outfile = config["file"].as_str();
     let emit = config["emit"].as_str().unwrap_or("");
     let hush = config["hush"].as_str().unwrap_or("");
+    let binary_format = config["format"].as_str().map_or(false, |s| s == "binary");
     let mut settings = Settings {
         filemode: config["mode"].as_str().unwrap_or("truncate").to_owned(),
         skip: config["skip"].as_str().unwrap_or("").to_owned(),
-        emit_copyfrom: emit.contains("copy_from")
+        // In binary mode no SQL preamble is written, so all emit flags are off.
+        emit_copyfrom: !binary_format && (emit.contains("copy_from")
             || emit.contains("create_table")
             || emit.contains("start_trans")
             || emit.contains("truncate")
-            || emit.contains("drop_table"),
-        emit_createtable: emit.contains("create_table"),
-        emit_starttransaction: emit.contains("start_trans"),
-        emit_truncate: emit.contains("truncate"),
-        emit_droptable: emit.contains("drop_table"),
+            || emit.contains("drop_table")),
+        emit_createtable: !binary_format && emit.contains("create_table"),
+        emit_starttransaction: !binary_format && emit.contains("start_trans"),
+        emit_truncate: !binary_format && emit.contains("truncate"),
+        emit_droptable: !binary_format && emit.contains("drop_table"),
         hush_version: hush.contains("version"),
         hush_info: hush.contains("info"),
         hush_notice: hush.contains("notice"),
@@ -96,6 +99,7 @@ fn main() {
         show_progress: config["prog"]
             .as_bool()
             .unwrap_or_else(|| stdout().is_terminal()),
+        binary_format,
     };
 
     let maintable = add_table(
