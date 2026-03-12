@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -35,7 +34,7 @@ pub enum Cardinality {
 pub struct Table<'a> {
     pub name: String,
     pub path: String,
-    pub buf: RefCell<String>,
+    pub buf: RefCell<Vec<u8>>,
     pub writer_channel: mpsc::SyncSender<Vec<u8>>,
     pub writer_thread: Option<thread::JoinHandle<()>>,
     pub columns: Vec<Column<'a>>,
@@ -44,13 +43,15 @@ pub struct Table<'a> {
     pub cardinality: Cardinality,
     pub emit_copyfrom: bool,
     pub emit_starttransaction: bool,
+    pub binary_format: bool,
 }
 
 impl<'a> Table<'a> {
     pub fn flush(&self) {
-        if self.buf.borrow().len() > 0 {
+        let mut buf = self.buf.borrow_mut();
+        if !buf.is_empty() {
             self.writer_channel
-                .send(std::mem::take(&mut *self.buf.borrow_mut()).into_bytes())
+                .send(std::mem::take(&mut *buf))
                 .unwrap();
         }
     }
@@ -64,11 +65,15 @@ impl<'a> Table<'a> {
 
 impl<'a> Drop for Table<'a> {
     fn drop(&mut self) {
-        if self.emit_copyfrom {
-            write!(self.buf.borrow_mut(), "\\.\n").unwrap();
-        }
-        if self.emit_starttransaction {
-            write!(self.buf.borrow_mut(), "COMMIT;\n").unwrap();
+        if self.binary_format {
+            crate::binary::write_file_trailer(&mut self.buf.borrow_mut());
+        } else {
+            if self.emit_copyfrom {
+                self.buf.borrow_mut().extend_from_slice(b"\\.\n");
+            }
+            if self.emit_starttransaction {
+                self.buf.borrow_mut().extend_from_slice(b"COMMIT;\n");
+            }
         }
         self.flush();
         self.writer_channel.send(Vec::new()).unwrap(); // Terminates the writer thread

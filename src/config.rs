@@ -4,7 +4,6 @@ use crate::output::write_output;
 use regex::Regex;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
 use std::io::{stdout, Write};
 use std::mem;
@@ -75,7 +74,7 @@ fn create_table<'a>(
     Table {
         name: name.to_owned(),
         path: ownpath,
-        buf: RefCell::new(String::new()),
+        buf: RefCell::new(Vec::new()),
         writer_channel,
         writer_thread: Some(writer_thread),
         columns: Vec::new(),
@@ -92,6 +91,7 @@ fn create_table<'a>(
         } else {
             false
         },
+        binary_format: settings.binary_format,
     }
 }
 
@@ -483,8 +483,13 @@ fn validate_column_options(
                 val
             );
         }
-        if val == "gml-to-ewkb" && !settings.hush_notice {
-            eprintln!("Notice: gml-to-ewkb conversion is experimental and in no way complete or standards compliant; use at your own risk");
+        if val == "gml-to-ewkb" {
+            if settings.binary_format {
+                fatalerr!("Error: gml-to-ewkb conversion is not supported in binary output mode");
+            }
+            if !settings.hush_notice {
+                eprintln!("Notice: gml-to-ewkb conversion is experimental and in no way complete or standards compliant; use at your own risk");
+            }
         }
         if val == "gml-to-coord" && !settings.hush_notice {
             eprintln!("Notice: gml-to-coord conversion is experimental and in no way complete or standards compliant; use at your own risk");
@@ -522,6 +527,12 @@ fn validate_column_options(
 }
 
 pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
+    if settings.binary_format {
+        // Binary mode: no SQL preamble — write only the 19-byte PGCOPY file header.
+        crate::binary::write_file_header(&mut table.buf.borrow_mut());
+        table.flush();
+        return;
+    }
     if settings.emit_starttransaction {
         write!(table.buf.borrow_mut(), "START TRANSACTION;\n").unwrap();
     }

@@ -5,7 +5,7 @@ use glob_match::glob_match;
 use quick_xml::events::Event;
 use std::borrow::Cow;
 use std::cell::RefMut;
-use std::fmt::Write;
+use std::io::Write;
 
 pub(crate) fn check_columns_used(table: &Table) {
     for col in &table.columns {
