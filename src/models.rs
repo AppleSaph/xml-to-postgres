@@ -36,7 +36,7 @@ pub struct Table<'a> {
     pub name: String,
     pub path: String,
     pub buf: RefCell<String>,
-    pub writer_channel: mpsc::SyncSender<String>,
+    pub writer_channel: mpsc::SyncSender<Vec<u8>>,
     pub writer_thread: Option<thread::JoinHandle<()>>,
     pub columns: Vec<Column<'a>>,
     pub lastid: RefCell<String>,
@@ -50,7 +50,7 @@ impl<'a> Table<'a> {
     pub fn flush(&self) {
         if self.buf.borrow().len() > 0 {
             self.writer_channel
-                .send(std::mem::take(&mut self.buf.borrow_mut()))
+                .send(std::mem::take(&mut *self.buf.borrow_mut()).into_bytes())
                 .unwrap();
         }
     }
@@ -71,7 +71,7 @@ impl<'a> Drop for Table<'a> {
             write!(self.buf.borrow_mut(), "COMMIT;\n").unwrap();
         }
         self.flush();
-        self.writer_channel.send(String::new()).unwrap(); // Terminates the writer thread
+        self.writer_channel.send(Vec::new()).unwrap(); // Terminates the writer thread
         let thread = std::mem::take(&mut self.writer_thread);
         thread
             .unwrap()
