@@ -102,30 +102,6 @@ fn main() {
             .unwrap_or_else(|| stdout().is_terminal()),
         binary_format,
     };
-    if !settings.hush_info {
-        println!(
-            "{}xml-to-postgres {}{}",
-            if !settings.hush_version {
-                "Version: "
-            } else {
-                ""
-            },
-            git_version!(args = ["--always", "--tags", "--dirty=-modified"]),
-            if settings.binary_format {
-                " (binary format)"
-            } else {
-                " (text format)"
-            }
-        );
-        if binary_format {
-            if !settings.hush_info {
-                eprintln!("Info: binary format selected");
-            }
-            if !settings.hush_warning {
-                eprintln!("Warning: binary format is not fully supported yet");
-            }
-        }
-    }
 
     let maintable = add_table(
         name,
