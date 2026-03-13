@@ -362,7 +362,7 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                             err
                         )
                     }));
-                    for pos in value.split(' ') {
+                    for pos in value.split_whitespace() {
                         state
                             .gmlcoll
                             .last_mut()
