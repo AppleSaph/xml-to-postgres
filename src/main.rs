@@ -1,9 +1,9 @@
+mod binary;
 mod config;
 mod geometry;
 mod models;
 mod output;
 mod processing;
-mod binary;
 
 use crate::config::{add_table, emit_preamble};
 use crate::models::{Cardinality, Settings, State, Step};
@@ -83,11 +83,12 @@ fn main() {
         filemode: config["mode"].as_str().unwrap_or("truncate").to_owned(),
         skip: config["skip"].as_str().unwrap_or("").to_owned(),
         // In binary mode no SQL preamble is written, so all emit flags are off.
-        emit_copyfrom: !binary_format && (emit.contains("copy_from")
-            || emit.contains("create_table")
-            || emit.contains("start_trans")
-            || emit.contains("truncate")
-            || emit.contains("drop_table")),
+        emit_copyfrom: !binary_format
+            && (emit.contains("copy_from")
+                || emit.contains("create_table")
+                || emit.contains("start_trans")
+                || emit.contains("truncate")
+                || emit.contains("drop_table")),
         emit_createtable: !binary_format && emit.contains("create_table"),
         emit_starttransaction: !binary_format && emit.contains("start_trans"),
         emit_truncate: !binary_format && emit.contains("truncate"),
@@ -101,25 +102,28 @@ fn main() {
             .unwrap_or_else(|| stdout().is_terminal()),
         binary_format,
     };
-    println!("{}xml-to-postgres {}{}",
-        if !settings.hush_version {
-            "Version: "
-        } else {
-            ""
-        },
-        git_version!(args = ["--always", "--tags", "--dirty=-modified"]),
-        if settings.binary_format {
-            " (binary format)"
-        } else {
-            " (text format)"
-        }
-    );
-    if binary_format {
-        if !settings.hush_info {
-            eprintln!("Info: binary format selected");
-        }
-        if !settings.hush_warning {
-            eprintln!("Warning: binary format is not fully supported yet");
+    if settings.hush_info {
+        println!(
+            "{}xml-to-postgres {}{}",
+            if !settings.hush_version {
+                "Version: "
+            } else {
+                ""
+            },
+            git_version!(args = ["--always", "--tags", "--dirty=-modified"]),
+            if settings.binary_format {
+                " (binary format)"
+            } else {
+                " (text format)"
+            }
+        );
+        if binary_format {
+            if !settings.hush_info {
+                eprintln!("Info: binary format selected");
+            }
+            if !settings.hush_warning {
+                eprintln!("Warning: binary format is not fully supported yet");
+            }
         }
     }
 
