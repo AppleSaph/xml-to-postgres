@@ -117,6 +117,16 @@ pub fn encode_field(buf: &mut Vec<u8>, value: &str, datatype: &str) {
             }
         }
 
+        // ── Geometric types ────────────────────────────────────────────────
+        "point" => match parse_point(value) {
+            Some((x, y)) => {
+                buf.extend_from_slice(&16_i32.to_be_bytes());
+                buf.extend_from_slice(&x.to_be_bytes());
+                buf.extend_from_slice(&y.to_be_bytes());
+            }
+            None => write_null(buf),
+        },
+
         // ── Text and everything else ──────────────────────────────────────
         // For text, varchar, character varying, unknown types, and geometry
         // coordinate strings produced by gml-to-coord, write raw UTF-8 bytes
@@ -148,6 +158,20 @@ fn encode_text(buf: &mut Vec<u8>, value: &str) {
     let bytes = value.as_bytes();
     buf.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
     buf.extend_from_slice(bytes);
+}
+
+/// Parse a PostgreSQL point textual representation into an `(x, y)` pair.
+/// Accepted forms: `x,y` and `(x,y)` with optional surrounding whitespace.
+fn parse_point(value: &str) -> Option<(f64, f64)> {
+    let raw = value.trim();
+    let trimmed = raw
+        .strip_prefix('(')
+        .and_then(|v| v.strip_suffix(')'))
+        .unwrap_or(raw);
+    let (x, y) = trimmed.split_once(',')?;
+    let x = x.trim().parse::<f64>().ok()?;
+    let y = y.trim().parse::<f64>().ok()?;
+    Some((x, y))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -351,6 +375,24 @@ mod tests {
         encode_field(&mut buf, "2000-01-01T00:00:00Z", "timestamptz");
         assert_eq!(read_i32(&buf[0..4]), 8, "length");
         assert_eq!(read_i64(&buf[4..12]), 0, "epoch microseconds");
+    }
+
+    #[test]
+    fn point_encodes_as_two_float8_values() {
+        let mut buf = Vec::new();
+        encode_field(&mut buf, "6.87376596,53.31873138", "point");
+        assert_eq!(read_i32(&buf[0..4]), 16, "length");
+        let x = f64::from_be_bytes(buf[4..12].try_into().unwrap());
+        let y = f64::from_be_bytes(buf[12..20].try_into().unwrap());
+        assert!((x - 6.87376596).abs() < 1e-12);
+        assert!((y - 53.31873138).abs() < 1e-12);
+    }
+
+    #[test]
+    fn point_invalid_value_encodes_as_null() {
+        let mut buf = Vec::new();
+        encode_field(&mut buf, "not-a-point", "point");
+        assert_eq!(read_i32(&buf[0..4]), -1);
     }
 }
 

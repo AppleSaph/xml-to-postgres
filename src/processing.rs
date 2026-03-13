@@ -401,7 +401,14 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                             err
                         )
                     });
-                    if table.columns[i].trim {
+                    if state.settings.binary_format {
+                        if table.columns[i].trim {
+                            let trimmed = state.trimre.replace_all(&decoded, " ");
+                            table.columns[i].value.borrow_mut().push_str(&trimmed);
+                        } else {
+                            table.columns[i].value.borrow_mut().push_str(&decoded);
+                        }
+                    } else if table.columns[i].trim {
                         let trimmed = state.trimre.replace_all(&decoded, " ");
                         table.columns[i]
                             .value
@@ -495,7 +502,25 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                             if key.is_empty() && !state.settings.hush_warning {
                                 eprintln!("Warning: subtable {} has no foreign key for parent (you may need to add a 'seri' column)", table.name);
                             }
-                            write!(table.buf.borrow_mut(), "{}\t", key).unwrap();
+                            if state.settings.binary_format {
+                                let fkey_fields = if table.domain.is_some() {
+                                    2u16
+                                } else {
+                                    1 + count_visible_fields(table)
+                                };
+                                crate::binary::write_tuple_header(
+                                    &mut table.buf.borrow_mut(),
+                                    fkey_fields,
+                                );
+                                let parent_dt = &state.tables.last().unwrap().columns[0].datatype;
+                                crate::binary::encode_field(
+                                    &mut table.buf.borrow_mut(),
+                                    &key,
+                                    parent_dt,
+                                );
+                            } else {
+                                write!(table.buf.borrow_mut(), "{}\t", key).unwrap();
+                            }
                             let rowid;
                             if let Some(domain) = table.domain.as_ref() {
                                 let mut domain = domain.borrow_mut();
@@ -504,56 +529,117 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                                     domain.lastid += 1;
                                     rowid = domain.lastid;
                                     domain.map.insert(key, rowid);
-                                    if table.columns.len() == 1 {
-                                        write!(domain.table.buf.borrow_mut(), "{}\t", rowid)
-                                            .unwrap();
-                                    }
-                                    for i in 0..table.columns.len() {
-                                        if table.columns[i].subtable.is_some() {
-                                            continue;
-                                        }
-                                        if table.columns[i].hide {
-                                            continue;
-                                        }
-                                        if i > 0 {
-                                            write!(domain.table.buf.borrow_mut(), "\t").unwrap();
-                                        }
-                                        if table.columns[i].value.borrow().is_empty() {
-                                            write!(domain.table.buf.borrow_mut(), "\\N").unwrap();
-                                        } else if let Some(domain) =
-                                            table.columns[i].domain.as_ref()
-                                        {
-                                            let mut domain = domain.borrow_mut();
-                                            let id = get_id(&table, &i, &mut domain);
-                                            write!(domain.table.buf.borrow_mut(), "{}", id)
-                                                .unwrap();
+                                    if state.settings.binary_format {
+                                        if table.columns.len() == 1 {
+                                            crate::binary::write_tuple_header(
+                                                &mut domain.table.buf.borrow_mut(),
+                                                2,
+                                            );
+                                            crate::binary::encode_field(
+                                                &mut domain.table.buf.borrow_mut(),
+                                                &rowid.to_string(),
+                                                "integer",
+                                            );
                                         } else {
-                                            write!(
-                                                domain.table.buf.borrow_mut(),
-                                                "{}",
-                                                &table.columns[i].value.borrow()
-                                            )
-                                            .unwrap();
+                                            crate::binary::write_tuple_header(
+                                                &mut domain.table.buf.borrow_mut(),
+                                                count_visible_fields(table),
+                                            );
                                         }
+                                        for i in 0..table.columns.len() {
+                                            if table.columns[i].subtable.is_some() { continue; }
+                                            if table.columns[i].hide { continue; }
+                                            if table.columns[i].value.borrow().is_empty() {
+                                                crate::binary::write_null(
+                                                    &mut domain.table.buf.borrow_mut(),
+                                                );
+                                            } else if let Some(domain) =
+                                                table.columns[i].domain.as_ref()
+                                            {
+                                                let mut domain = domain.borrow_mut();
+                                                let id = get_id(&table, &i, &mut domain);
+                                                crate::binary::encode_field(
+                                                    &mut domain.table.buf.borrow_mut(),
+                                                    &id.to_string(),
+                                                    "integer",
+                                                );
+                                            } else {
+                                                crate::binary::encode_field(
+                                                    &mut domain.table.buf.borrow_mut(),
+                                                    &table.columns[i].value.borrow(),
+                                                    &table.columns[i].datatype,
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        if table.columns.len() == 1 {
+                                            write!(domain.table.buf.borrow_mut(), "{}\t", rowid)
+                                                .unwrap();
+                                        }
+                                        for i in 0..table.columns.len() {
+                                            if table.columns[i].subtable.is_some() { continue; }
+                                            if table.columns[i].hide { continue; }
+                                            if i > 0 {
+                                                write!(domain.table.buf.borrow_mut(), "\t").unwrap();
+                                            }
+                                            if table.columns[i].value.borrow().is_empty() {
+                                                write!(domain.table.buf.borrow_mut(), "\\N").unwrap();
+                                            } else if let Some(domain) =
+                                                table.columns[i].domain.as_ref()
+                                            {
+                                                let mut domain = domain.borrow_mut();
+                                                let id = get_id(&table, &i, &mut domain);
+                                                write!(domain.table.buf.borrow_mut(), "{}", id)
+                                                    .unwrap();
+                                            } else {
+                                                write!(
+                                                    domain.table.buf.borrow_mut(),
+                                                    "{}",
+                                                    &table.columns[i].value.borrow()
+                                                )
+                                                .unwrap();
+                                            }
+                                        }
+                                        write!(domain.table.buf.borrow_mut(), "\n").unwrap();
                                     }
-                                    write!(domain.table.buf.borrow_mut(), "\n").unwrap();
                                     domain.table.flush();
                                 } else {
                                     rowid = *domain.map.get(&key).unwrap();
                                 }
-                                if table.columns.len() == 1 {
-                                    // Single column many-to-many subtable; needs the id from the domain map
-                                    write!(table.buf.borrow_mut(), "{}", rowid).unwrap();
-                                } else {
-                                    if table.lastid.borrow().is_empty()
-                                        && !state.settings.hush_warning
-                                    {
-                                        eprintln!("Warning: subtable {} has no primary key to normalize on", table.name);
+                                if state.settings.binary_format {
+                                    if table.columns.len() == 1 {
+                                        crate::binary::encode_field(
+                                            &mut table.buf.borrow_mut(),
+                                            &rowid.to_string(),
+                                            "integer",
+                                        );
+                                    } else {
+                                        if table.lastid.borrow().is_empty()
+                                            && !state.settings.hush_warning
+                                        {
+                                            eprintln!("Warning: subtable {} has no primary key to normalize on", table.name);
+                                        }
+                                        crate::binary::encode_field(
+                                            &mut table.buf.borrow_mut(),
+                                            &table.lastid.borrow(),
+                                            &table.columns[0].datatype,
+                                        );
                                     }
-                                    write!(table.buf.borrow_mut(), "{}", table.lastid.borrow())
-                                        .unwrap(); // This is a many-to-many relation; write the two keys into the link table
+                                } else {
+                                    if table.columns.len() == 1 {
+                                        // Single column many-to-many subtable; needs the id from the domain map
+                                        write!(table.buf.borrow_mut(), "{}", rowid).unwrap();
+                                    } else {
+                                        if table.lastid.borrow().is_empty()
+                                            && !state.settings.hush_warning
+                                        {
+                                            eprintln!("Warning: subtable {} has no primary key to normalize on", table.name);
+                                        }
+                                        write!(table.buf.borrow_mut(), "{}", table.lastid.borrow())
+                                            .unwrap(); // This is a many-to-many relation; write the two keys into the link table
+                                    }
+                                    write!(table.buf.borrow_mut(), "\n").unwrap();
                                 }
-                                write!(table.buf.borrow_mut(), "\n").unwrap();
                                 table.flush();
                                 table.clear_columns();
                                 state.table = state.tables.pop().unwrap();
@@ -599,38 +685,84 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                         }
                     }
                     // Now write out the other column values
-                    for i in 0..table.columns.len() {
-                        if table.columns[i].subtable.is_some()
-                            && table.columns[i].subtable.as_ref().unwrap().cardinality
-                                != Cardinality::ManyToOne
+                    if state.settings.binary_format {
+                        // In binary mode, write tuple header only when we haven't
+                        // already written one (main table or ManyToOne subtable).
+                        // Non-ManyToOne subtables already wrote the tuple header
+                        // + fkey in site B above.
+                        if state.tables.is_empty()
+                            || table.cardinality == Cardinality::ManyToOne
                         {
-                            continue;
+                            crate::binary::write_tuple_header(
+                                &mut table.buf.borrow_mut(),
+                                count_visible_fields(table),
+                            );
                         }
-                        if table.columns[i].hide {
-                            table.columns[i].value.borrow_mut().clear();
-                            continue;
+                        for i in 0..table.columns.len() {
+                            if table.columns[i].subtable.is_some()
+                                && table.columns[i].subtable.as_ref().unwrap().cardinality
+                                    != Cardinality::ManyToOne
+                            {
+                                continue;
+                            }
+                            if table.columns[i].hide {
+                                table.columns[i].value.borrow_mut().clear();
+                                continue;
+                            }
+                            if table.columns[i].value.borrow().is_empty() {
+                                crate::binary::write_null(&mut table.buf.borrow_mut());
+                            } else if let Some(domain) = table.columns[i].domain.as_ref() {
+                                let mut domain = domain.borrow_mut();
+                                let id = get_id(&table, &i, &mut domain);
+                                crate::binary::encode_field(
+                                    &mut table.buf.borrow_mut(),
+                                    &id.to_string(),
+                                    "integer",
+                                );
+                                table.columns[i].value.borrow_mut().clear();
+                            } else {
+                                crate::binary::encode_field(
+                                    &mut table.buf.borrow_mut(),
+                                    &table.columns[i].value.borrow(),
+                                    &table.columns[i].datatype,
+                                );
+                                table.columns[i].value.borrow_mut().clear();
+                            }
                         }
-                        if i > 0 {
-                            write!(table.buf.borrow_mut(), "\t").unwrap();
+                    } else {
+                        for i in 0..table.columns.len() {
+                            if table.columns[i].subtable.is_some()
+                                && table.columns[i].subtable.as_ref().unwrap().cardinality
+                                    != Cardinality::ManyToOne
+                            {
+                                continue;
+                            }
+                            if table.columns[i].hide {
+                                table.columns[i].value.borrow_mut().clear();
+                                continue;
+                            }
+                            if i > 0 {
+                                write!(table.buf.borrow_mut(), "\t").unwrap();
+                            }
+                            if table.columns[i].value.borrow().is_empty() {
+                                write!(table.buf.borrow_mut(), "\\N").unwrap();
+                            } else if let Some(domain) = table.columns[i].domain.as_ref() {
+                                let mut domain = domain.borrow_mut();
+                                let id = get_id(&table, &i, &mut domain);
+                                write!(table.buf.borrow_mut(), "{}", id).unwrap();
+                                table.columns[i].value.borrow_mut().clear();
+                            } else {
+                                write!(
+                                    table.buf.borrow_mut(),
+                                    "{}",
+                                    &table.columns[i].value.borrow()
+                                )
+                                .unwrap();
+                                table.columns[i].value.borrow_mut().clear();
+                            }
                         }
-                        if table.columns[i].value.borrow().is_empty() {
-                            write!(table.buf.borrow_mut(), "\\N").unwrap();
-                        } else if let Some(domain) = table.columns[i].domain.as_ref() {
-                            let mut domain = domain.borrow_mut();
-                            let id = get_id(&table, &i, &mut domain);
-                            write!(table.buf.borrow_mut(), "{}", id).unwrap();
-                            table.columns[i].value.borrow_mut().clear();
-                        } else {
-                            write!(
-                                table.buf.borrow_mut(),
-                                "{}",
-                                &table.columns[i].value.borrow()
-                            )
-                            .unwrap();
-                            table.columns[i].value.borrow_mut().clear();
-                        }
+                        write!(table.buf.borrow_mut(), "\n").unwrap();
                     }
-                    write!(table.buf.borrow_mut(), "\n").unwrap();
                     table.flush();
                 }
                 if !state.tables.is_empty() {
@@ -736,13 +868,35 @@ fn get_id(table: &&&Table, i: &usize, domain: &mut RefMut<Domain>) -> u32 {
             domain
                 .map
                 .insert(table.columns[*i].value.borrow().to_string(), id);
-            write!(
-                domain.table.buf.borrow_mut(),
-                "{}\t{}\n",
-                id,
-                *table.columns[*i].value.borrow()
-            )
-            .unwrap();
+            if domain.table.binary_format {
+                crate::binary::write_tuple_header(
+                    &mut domain.table.buf.borrow_mut(),
+                    2,
+                );
+                crate::binary::encode_field(
+                    &mut domain.table.buf.borrow_mut(),
+                    &id.to_string(),
+                    "integer",
+                );
+                let dt = if domain.table.columns.len() > 1 {
+                    &domain.table.columns[1].datatype
+                } else {
+                    "text"
+                };
+                crate::binary::encode_field(
+                    &mut domain.table.buf.borrow_mut(),
+                    &table.columns[*i].value.borrow(),
+                    dt,
+                );
+            } else {
+                write!(
+                    domain.table.buf.borrow_mut(),
+                    "{}\t{}\n",
+                    id,
+                    *table.columns[*i].value.borrow()
+                )
+                .unwrap();
+            }
             domain.table.flush();
             id
         }
@@ -755,6 +909,21 @@ fn path_match(path: &String, mask: &String) -> bool {
         return path == mask;
     }
     glob_match(mask, path)
+}
+
+fn count_visible_fields(table: &Table) -> u16 {
+    table
+        .columns
+        .iter()
+        .filter(|c| {
+            if c.subtable.is_some()
+                && c.subtable.as_ref().unwrap().cardinality != Cardinality::ManyToOne
+            {
+                return false;
+            }
+            !c.hide
+        })
+        .count() as u16
 }
 
 fn allow_iteration(column: &Column, settings: &Settings) -> bool {

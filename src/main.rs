@@ -78,7 +78,7 @@ fn main() {
     let outfile = config["file"].as_str();
     let emit = config["emit"].as_str().unwrap_or("");
     let hush = config["hush"].as_str().unwrap_or("");
-    let binary_format = config["format"].as_str().map_or(false, |s| s == "binary");
+    let binary_format = config["format"].as_str().unwrap_or("text") == "binary";
     let mut settings = Settings {
         filemode: config["mode"].as_str().unwrap_or("truncate").to_owned(),
         skip: config["skip"].as_str().unwrap_or("").to_owned(),
@@ -101,6 +101,27 @@ fn main() {
             .unwrap_or_else(|| stdout().is_terminal()),
         binary_format,
     };
+    println!("{}xml-to-postgres {}{}",
+        if !settings.hush_version {
+            "Version: "
+        } else {
+            ""
+        },
+        git_version!(args = ["--always", "--tags", "--dirty=-modified"]),
+        if settings.binary_format {
+            " (binary format)"
+        } else {
+            " (text format)"
+        }
+    );
+    if binary_format {
+        if !settings.hush_info {
+            eprintln!("Info: binary format selected");
+        }
+        if !settings.hush_warning {
+            eprintln!("Warning: binary format is not fully supported yet");
+        }
+    }
 
     let maintable = add_table(
         name,
