@@ -268,15 +268,36 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                                                 table.columns[i].find.as_ref(),
                                                 table.columns[i].replace,
                                             ) {
-                                                table.columns[i]
-                                                    .value
-                                                    .borrow_mut()
-                                                    .push_str(&regex.replace_all(&value, replacer));
-                                            } else {
+                                                let replaced = regex.replace_all(&value, replacer);
+                                                if state.settings.binary_format {
+                                                    table.columns[i]
+                                                        .value
+                                                        .borrow_mut()
+                                                        .push_str(&replaced);
+                                                } else {
+                                                    table.columns[i].value.borrow_mut().push_str(
+                                                        &replaced
+                                                            .cow_replace("\\", "\\\\")
+                                                            .cow_replace("\r", "\\r")
+                                                            .cow_replace("\n", "\\n")
+                                                            .cow_replace("\t", "\\t")
+                                                            .cow_replace("'", "\\'"),
+                                                    );
+                                                }
+                                            } else if state.settings.binary_format {
                                                 table.columns[i]
                                                     .value
                                                     .borrow_mut()
                                                     .push_str(&value);
+                                            } else {
+                                                table.columns[i].value.borrow_mut().push_str(
+                                                    &value
+                                                        .cow_replace("\\", "\\\\")
+                                                        .cow_replace("\r", "\\r")
+                                                        .cow_replace("\n", "\\n")
+                                                        .cow_replace("\t", "\\t")
+                                                        .cow_replace("'", "\\'"),
+                                                );
                                             }
                                         } else if !state.settings.hush_warning {
                                             eprintln!("Warning: failed to decode attribute {} for column {}", request, table.columns[i].name);
@@ -410,17 +431,20 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                         }
                     } else if table.columns[i].trim {
                         let trimmed = state.trimre.replace_all(&decoded, " ");
-                        table.columns[i]
-                            .value
-                            .borrow_mut()
-                            .push_str(&trimmed.cow_replace("\\", "\\\\").cow_replace("\t", "\\t"));
+                        table.columns[i].value.borrow_mut().push_str(
+                            &trimmed
+                                .cow_replace("\\", "\\\\")
+                                .cow_replace("\t", "\\t")
+                                .cow_replace("'", "\\'"),
+                        );
                     } else {
                         table.columns[i].value.borrow_mut().push_str(
                             &decoded
                                 .cow_replace("\\", "\\\\")
                                 .cow_replace("\r", "\\r")
                                 .cow_replace("\n", "\\n")
-                                .cow_replace("\t", "\\t"),
+                                .cow_replace("\t", "\\t")
+                                .cow_replace("'", "\\'"),
                         );
                     }
                     if let (Some(regex), Some(replacer)) =
