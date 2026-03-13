@@ -102,7 +102,7 @@ fn main() {
             .unwrap_or_else(|| stdout().is_terminal()),
         binary_format,
     };
-    if settings.hush_info {
+    if !settings.hush_info {
         println!(
             "{}xml-to-postgres {}{}",
             if !settings.hush_version {
