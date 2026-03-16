@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::sync::mpsc;
 
-pub fn write_output(file: RefCell<Box<dyn Write>>, rx: mpsc::Receiver<Vec<u8>>) {
+pub fn write_output(file: RefCell<Box<dyn Write + Send>>, rx: mpsc::Receiver<Vec<u8>>) {
     while let Ok(buf) = rx.recv() {
         if buf.is_empty() {
             break;
