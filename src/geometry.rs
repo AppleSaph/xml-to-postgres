@@ -173,6 +173,6 @@ pub fn gml_to_coord(cell: &RefCell<String>, coll: &[Geometry], settings: &Settin
     let (lat, lon) = rd_to_wgs84(sumx / count as f64, sumy / count as f64);
     let mut value = cell.borrow_mut();
     value.clear();
-    write!(value, "{:.8},{:.8}", lon, lat).unwrap();
+    write!(value, "{:.14},{:.14}", lon, lat).unwrap();
     true
 }
