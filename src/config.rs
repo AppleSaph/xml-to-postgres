@@ -562,6 +562,7 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
             )
             .unwrap();
         } else {
+            let mut explicit_fkey = false;
             let mut cols = table
                 .columns
                 .iter()
@@ -572,6 +573,9 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
                     {
                         return None;
                     }
+                    if c.fkey.is_some() {
+                        explicit_fkey = true;
+                    }
                     let mut spec = String::from(&c.name);
                     spec.push(' ');
                     spec.push_str(&c.datatype);
@@ -579,7 +583,7 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
                 })
                 .collect::<Vec<String>>()
                 .join(", ");
-            if fkey.is_some() {
+            if fkey.is_some() && !explicit_fkey {
                 cols.insert_str(0, &format!("{}, ", fkey.as_ref().unwrap()));
             }
             write!(
@@ -607,6 +611,7 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
             )
             .unwrap();
         } else {
+            let mut explicit_fkey = false;
             let cols = table
                 .columns
                 .iter()
@@ -617,11 +622,12 @@ pub fn emit_preamble(table: &Table, settings: &Settings, fkey: Option<String>) {
                     {
                         return None;
                     }
+                    if c.fkey.is_some() { explicit_fkey = true; }
                     Some(String::from(&c.name))
                 })
                 .collect::<Vec<String>>()
                 .join(", ");
-            if fkey.is_some() {
+            if fkey.is_some() && !explicit_fkey {
                 write!(
                     table.buf.borrow_mut(),
                     "COPY {} ({}, {}) FROM stdin;\n",

@@ -496,8 +496,9 @@ pub(crate) fn process_event(event: &Event, state: &mut State) -> Step {
                 } else {
                     if !state.tables.is_empty() {
                         // This is a subtable
-                        if table.cardinality != Cardinality::ManyToOne {
+                        if table.cardinality != Cardinality::ManyToOne && table.columns.iter().find(|c| c.fkey.is_some()).is_none() {
                             // Write the first column value of the parent table as the first column of the subtable (for use as a foreign key)
+                            // but only if there is no explicit fkey column defined
                             let key = state.tables.last().unwrap().lastid.borrow();
                             if key.is_empty() && !state.settings.hush_warning {
                                 eprintln!("Warning: subtable {} has no foreign key for parent (you may need to add a 'seri' column)", table.name);
