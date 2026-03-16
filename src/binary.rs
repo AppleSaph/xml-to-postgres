@@ -73,11 +73,19 @@ pub fn encode_field(buf: &mut Vec<u8>, value: &str, datatype: &str) {
 
         // ── Boolean ───────────────────────────────────────────────────────
         "boolean" | "bool" => {
-            let v = matches!(
-                value.to_ascii_lowercase().as_str(),
-                "true" | "t" | "yes" | "on" | "1"
-            );
-            append_sql(buf, &v, &Type::BOOL);
+            let lowered = value.to_ascii_lowercase();
+            let bool_value = match lowered.as_str() {
+                // recognized true variants
+                "true" | "t" | "yes" | "on" | "1" => Some(true),
+                // recognized false variants
+                "false" | "f" | "no" | "off" | "0" => Some(false),
+                // unrecognized: treat as parse failure → NULL
+                _ => None,
+            };
+            match bool_value {
+                Some(v) => append_sql(buf, &v, &Type::BOOL),
+                None => write_null(buf),
+            }
         }
 
         // ── Date / time family ────────────────────────────────────────────
