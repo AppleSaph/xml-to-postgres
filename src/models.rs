@@ -66,7 +66,11 @@ impl<'a> Table<'a> {
 impl<'a> Drop for Table<'a> {
     fn drop(&mut self) {
         if self.binary_format {
-            crate::binary::write_file_trailer(&mut self.buf.borrow_mut());
+            // Only write a binary COPY trailer if we appear to have written at least one row.
+            // This helps avoid emitting a trailer for tables that never had a header emitted.
+            if !self.lastid.borrow().is_empty() {
+                crate::binary::write_file_trailer(&mut self.buf.borrow_mut());
+            }
         } else {
             if self.emit_copyfrom {
                 self.buf.borrow_mut().extend_from_slice(b"\\.\n");
