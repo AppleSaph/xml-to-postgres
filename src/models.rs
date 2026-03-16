@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -20,6 +19,7 @@ pub struct Settings {
     pub hush_notice: bool,
     pub hush_warning: bool,
     pub show_progress: bool,
+    pub binary_format: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -34,8 +34,8 @@ pub enum Cardinality {
 pub struct Table<'a> {
     pub name: String,
     pub path: String,
-    pub buf: RefCell<String>,
-    pub writer_channel: mpsc::SyncSender<String>,
+    pub buf: RefCell<Vec<u8>>,
+    pub writer_channel: mpsc::SyncSender<Vec<u8>>,
     pub writer_thread: Option<thread::JoinHandle<()>>,
     pub columns: Vec<Column<'a>>,
     pub lastid: RefCell<String>,
@@ -43,13 +43,15 @@ pub struct Table<'a> {
     pub cardinality: Cardinality,
     pub emit_copyfrom: bool,
     pub emit_starttransaction: bool,
+    pub binary_format: bool,
 }
 
 impl<'a> Table<'a> {
     pub fn flush(&self) {
-        if self.buf.borrow().len() > 0 {
+        let mut buf = self.buf.borrow_mut();
+        if !buf.is_empty() {
             self.writer_channel
-                .send(std::mem::take(&mut self.buf.borrow_mut()))
+                .send(std::mem::take(&mut *buf))
                 .unwrap();
         }
     }
@@ -63,14 +65,22 @@ impl<'a> Table<'a> {
 
 impl<'a> Drop for Table<'a> {
     fn drop(&mut self) {
-        if self.emit_copyfrom {
-            write!(self.buf.borrow_mut(), "\\.\n").unwrap();
-        }
-        if self.emit_starttransaction {
-            write!(self.buf.borrow_mut(), "COMMIT;\n").unwrap();
+        if self.binary_format {
+            // Only write a binary COPY trailer if we appear to have written at least one row.
+            // This helps avoid emitting a trailer for tables that never had a header emitted.
+            if !self.lastid.borrow().is_empty() {
+                crate::binary::write_file_trailer(&mut self.buf.borrow_mut());
+            }
+        } else {
+            if self.emit_copyfrom {
+                self.buf.borrow_mut().extend_from_slice(b"\\.\n");
+            }
+            if self.emit_starttransaction {
+                self.buf.borrow_mut().extend_from_slice(b"COMMIT;\n");
+            }
         }
         self.flush();
-        self.writer_channel.send(String::new()).unwrap(); // Terminates the writer thread
+        self.writer_channel.send(Vec::new()).unwrap(); // Terminates the writer thread
         let thread = std::mem::take(&mut self.writer_thread);
         thread
             .unwrap()
